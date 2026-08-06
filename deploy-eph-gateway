@@ -1,0 +1,75 @@
+#!/bin/bash
+
+readonly wireless_iface="${WIRELESS_IFACE:-wlan0}"
+readonly ether_iface="${ETHER_IFACE:-enu1u1}"
+readonly ether_gw_ip="${ETHER_GW_IP:-172.26.66.65}"
+readonly ether_mask="${ETHER_MASK:-/29}"
+readonly ether_dhcp_dns_server="${DHCP_DNS:-1.1.1.1}"
+readonly ether_dhcp_range="${DHCP_RANGE:-172.26.66.66,172.26.66.70}"
+readonly ether_dhcp_lease="${DHCP_LEASE:-2h}"
+readonly dnsmasq_config="${DNSMASQ_CONFIG_PATH:-/etc/dnsmasq.conf"
+
+function set_ip_rules {
+	iptables -F
+	iptables -t nat -F
+	iptables -t nat -A POSTROUTING -o $wireless_iface -j MASQUERADE
+	iptables -A FORWARD -i $wireless_iface -o $ether_iface -m state --state RELATED,ESTABLISHED -j ACCEPT
+	iptables -A FORWARD -i $ether_iface -o $wireless_iface -j ACCEPT
+	echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward	> /dev/null	
+}
+
+function set_ether_iface {
+	ip link set $ether_iface down
+	ip link set $ether_iface up
+	ip addr add $ether_gw_ip$ether_mask dev $ether_iface
+	ip route del 0/0 dev $ether_iface &> /dev/null
+}
+
+function structure_dnsmasq_config {
+	echo -e "interface=$ether_iface
+	bind-interfaces
+	server=$ether_dhcp_dns_server
+	domain-needed
+	bogus-priv
+	dhcp-range=$ether_dhcp_range,$ether_dhcp_lease" > $dnsmasq_config
+	sed -i 's/^[ \t]*//' $dnsmasq_config
+}
+
+function fix_dependencies {
+	local dependencies=("dnsmasq" "iptables" "ip" "sed")
+	for dep in "${dependencies[@]}"; do
+		if ! command -v "$dep" &> /dev/null; then
+			echo "Missing dependency: $dep. Installing ..."
+			apt update && apt install -y "$dep" &> /dev/null
+		fi
+	done
+}
+
+function set_dnsmasq_on {
+	fix_dependencies
+	set_ip_rules
+	set_ether_iface
+	if [ -f "$dnsmasq_config" ]; then
+		grep -n "$ether_dhcp_range" $dnsmasq_config 
+		if [ $? -eq 0 ]; then
+			systemctl start dnsmasq
+		else
+			mv $dnsmasq_config "$dnsmasq_config\_replaced"
+			structure_dnsmasq_config
+			systemctl start dnsmasq
+		fi
+	else
+		structure_dnsmasq_config
+		systemctl start dnsmasq
+	fi
+}
+
+function check_superuser {
+	if [[ $EUID -ne 0 ]]; then
+		echo "This script must be run as root. Please run it again as root."
+		exit 1
+	fi
+}
+
+check_superuser
+set_dnsmasq_on

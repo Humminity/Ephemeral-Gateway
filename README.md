@@ -23,5 +23,5 @@ Because this project is currently a work in progress, there are a few important 
 ## Usage
 
 ```bash
-# Example placeholder
+# Usage with all the default parameters.
 sudo ./ephemeral-gateway

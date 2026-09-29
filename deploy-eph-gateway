@@ -20,6 +20,7 @@ function set_ip_rules {
 
 function set_ether_iface {
 	ip link set $ether_iface down
+	ip addr flush dev $ether_iface
 	ip link set $ether_iface up
 	ip addr add $ether_gw_ip$ether_mask dev $ether_iface
 	ip route del 0/0 dev $ether_iface &> /dev/null
